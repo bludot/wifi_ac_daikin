@@ -18,6 +18,8 @@
 #include <ESP8266mDNS.h>
 #include <ir_Daikin.h>
 #include <IRDaikinServer.h>
+#include "../lib/RoomConditions/RoomConditions.h"
+
 
 #define DEBUG // If defined debug output is activated
 
@@ -31,6 +33,7 @@
 #define DEBUG_PRINTLN(x)
 #endif
 
+temperature::RoomConditions roomConditions;
 IRDaikinESP daikinir(D1);  // An IR LED is controlled by GPIO pin 4 (D2)
 
 const char* ssid = "";
@@ -42,11 +45,6 @@ ESP8266HTTPUpdateServer httpUpdater; // Optional web interface to remotely updat
 setting_t fan_speeds[6] = { { "Auto", DAIKIN_FAN_AUTO },{ "Slowest", 1 },{ "Slow", 2 },{ "Medium", 3 },{ "Fast", 4 },{ "Fastest", 5 } };
 setting_t modes[5] = { { "Cool", DAIKIN_COOL }, { "Heat", DAIKIN_HEAT }, { "Fan", DAIKIN_FAN }, { "Auto", DAIKIN_AUTO }, { "Dry", DAIKIN_DRY } };
 setting_t on_off[2] = { { "On", 1 }, { "Off", 0 } };
-
-// temp
-int sensorValue = 0;
-float temperature = 0.0;
-float inputVoltage = 0.0;
 
 void saveStatus() {
     EEPROM_data data_new;
@@ -163,9 +161,20 @@ void handleNotFound() {
     server.send(404, "text/plain", "404 File Not Found");
 }
 
+void handleRoomConditions() {
+    temperature::Conditions condition = roomConditions.getConditions();
+
+    char buff[500];
+    snprintf(buff, sizeof(buff), "{\"tempC\": %f, \"tempF\": %f, \"humidity\": %f}", condition.temperatureC, condition.temperatureF, condition.humidity);
+    String resp(buff);
+    server.send(200, "text/plaintext", resp);
+}
+
 void setup(void) {
     EEPROM.begin(EEPROM_SIZE);
     DEBUG_BEGIN(115200);
+    roomConditions.setup();
+
 
     // analogReference(INTERNAL);
     pinMode(A0, INPUT);
@@ -188,6 +197,7 @@ void setup(void) {
 
     server.on("/", handleRoot);
     server.on("/cmd", handleCmd);
+    server.on("/roomconditions", handleRoomConditions);
 
     server.onNotFound(handleNotFound);
 
@@ -200,46 +210,9 @@ void setup(void) {
     }
 }
 
-void checkRoomTemp() {
-
-    // Average 10 readings of the sensor inputs
-    sensorValue = 0;
-
-    for (int i=0; i<10; i++) {
-        sensorValue += analogRead(A0);
-        delay (500);
-    }
-
-    sensorValue /= 10;
-
-    Serial.print ("Sensor value: ");
-    Serial.print (sensorValue);
-    Serial.print (" units | ");
-
-    // Convert ADC input into voltage
-    inputVoltage = sensorValue * (5.0/1023) * 1000; // input voltage in mV
-
-    Serial.print ("Input voltage: ");
-    Serial.print (inputVoltage);
-    Serial.print (" mV | ");
-
-    // Convert to temperature using LM35 linear relation
-    temperature = inputVoltage / 10;
-
-    // Alternative method? Linear relation between temp. and voltage
-    // 5 V = 150 oC, 0 V = 2 oC, slope = (150-2)/(5-0) = 29.6 and intercept = 2.0
-    // temperature = (29.6 * inputVoltage) + 2;
-
-    Serial.print ("Temp.: ");
-    Serial.print (temperature);
-    Serial.print (" deg.C");
-
-    Serial.println();
-}
-
 void loop(void) {
     // need to wait until I cant get consistent 5v
-    checkRoomTemp();
+    roomConditions.setConditions();
     server.handleClient();
-    delay(1000);
+    delay(300);
 }

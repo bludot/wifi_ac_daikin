@@ -11,83 +11,93 @@
 *
 */
 
+#include <ESPAsyncWebServer.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266HTTPUpdateServer.h>
 #include <ESP8266mDNS.h>
 #include <ir_Daikin.h>
-#include <IRDaikinServer.h>
 #include "../lib/RoomConditions/RoomConditions.h"
+#include "../lib/EEPROMManager/EEPROMManager.h"
+#include "../lib/WifiConnectionManager/WifiConnectionManager.h"
+#include <ArduinoJson.h>
+#include "LittleFS.h"
 
 
-#define DEBUG // If defined debug output is activated
 
-#ifdef DEBUG
-#define DEBUG_PRINT(x)    Serial.print(x)
-#define DEBUG_BEGIN(x)    Serial.begin(x)
-#define DEBUG_PRINTLN(x)  Serial.println(x)
-#else
-#define DEBUG_PRINT(x)
-#define DEBUG_BEGIN(x)
-#define DEBUG_PRINTLN(x)
-#endif
-
-temperature::RoomConditions roomConditions;
+RoomConditions roomConditions;
+EEPROMManager<EEPROMData> eepromManager;
 IRDaikinESP daikinir(D1);  // An IR LED is controlled by GPIO pin 4 (D2)
 
-const char* ssid = "";
-const char* password = "";
+AsyncWebServer server(80);
 
-ESP8266WebServer server(80);
-ESP8266HTTPUpdateServer httpUpdater; // Optional web interface to remotely update the firmware
+
+
+WifiConnectionManager wifiConnectionManager(eepromManager);
 
 setting_t fan_speeds[6] = { { "Auto", DAIKIN_FAN_AUTO },{ "Slowest", 1 },{ "Slow", 2 },{ "Medium", 3 },{ "Fast", 4 },{ "Fastest", 5 } };
 setting_t modes[5] = { { "Cool", DAIKIN_COOL }, { "Heat", DAIKIN_HEAT }, { "Fan", DAIKIN_FAN }, { "Auto", DAIKIN_AUTO }, { "Dry", DAIKIN_DRY } };
 setting_t on_off[2] = { { "On", 1 }, { "Off", 0 } };
 
+const int ledPin = 2;
+String ledState;
+
+// Replaces placeholder with LED state value
+String processor(const String& var){
+    Serial.println(var);
+    if(var == "GPIO_STATE"){
+        if(digitalRead(ledPin)){
+            ledState = "OFF";
+        }
+        else{
+            ledState = "ON";
+        }
+        Serial.print(ledState);
+        return ledState;
+    }
+    return String();
+}
+
 void saveStatus() {
-    EEPROM_data data_new;
-    data_new.temp = daikinir.getTemp();
-    data_new.fan = daikinir.getFan();
-    data_new.power = daikinir.getPower();
-    data_new.powerful = daikinir.getPowerful();
-    data_new.quiet = daikinir.getQuiet();
-    data_new.swingh = daikinir.getSwingHorizontal();
-    data_new.swingv = daikinir.getSwingVertical();
-    data_new.mode = daikinir.getMode();
-    EEPROM.put(0, data_new);
-    EEPROM.commit();
+    EEPROMData data_new;
+    data_new.acData.temp = daikinir.getTemp();
+    data_new.acData.fan = daikinir.getFan();
+    data_new.acData.power = daikinir.getPower();
+    data_new.acData.powerful = daikinir.getPowerful();
+    data_new.acData.quiet = daikinir.getQuiet();
+    data_new.acData.swingh = daikinir.getSwingHorizontal();
+    data_new.acData.swingv = daikinir.getSwingVertical();
+    data_new.acData.mode = daikinir.getMode();
+    data_new.wifiCreds = wifiConnectionManager.getCredentials();
+    eepromManager.saveData(data_new);
 }
 
 void restoreStatus() {
-    EEPROM_data data_stored;
-    EEPROM.get(0, data_stored);
-    if (data_stored.power != NULL) {
-        daikinir.setTemp(data_stored.temp);
-        daikinir.setFan(data_stored.fan);
-        daikinir.setPower(data_stored.power);
-        daikinir.setPowerful(data_stored.powerful);
-        daikinir.setQuiet(data_stored.quiet);
-        daikinir.setSwingHorizontal(data_stored.swingh);
-        daikinir.setSwingVertical(data_stored.swingv);
-        daikinir.setMode(data_stored.mode);
+    EEPROMData data_stored = eepromManager.getData();
+    if (data_stored.acData.power != false) {
+        daikinir.setTemp(data_stored.acData.temp);
+        daikinir.setFan(data_stored.acData.fan);
+        daikinir.setPower(data_stored.acData.power);
+        daikinir.setPowerful(data_stored.acData.powerful);
+        daikinir.setQuiet(data_stored.acData.quiet);
+        daikinir.setSwingHorizontal(data_stored.acData.swingh);
+        daikinir.setSwingVertical(data_stored.acData.swingv);
+        daikinir.setMode(data_stored.acData.mode);
         daikinir.send();
     } else {
         daikinir.setTemp(25);
         daikinir.setFan(2);
-        daikinir.setPower(0);
-        daikinir.setPowerful(0);
-        daikinir.setQuiet(0);
-        daikinir.setSwingHorizontal(0);
-        daikinir.setSwingVertical(0);
+        daikinir.setPower(false);
+        daikinir.setPowerful(false);
+        daikinir.setQuiet(false);
+        daikinir.setSwingHorizontal(false);
+        daikinir.setSwingVertical(false);
         daikinir.setMode(DAIKIN_COOL);
         daikinir.send();
         saveStatus();
     }
 }
 
-String getSelection(String name, int min, int max, int selected, setting_t* list) {
+String getSelection(const String& name, int min, int max, int selected, setting_t* list) {
     String ret = "<select name=\""+name+"\">";
     for (int i = min; i <= max; i++) {
         ret += "<option ";
@@ -98,81 +108,99 @@ String getSelection(String name, int min, int max, int selected, setting_t* list
     return ret += "</select><br\>";
 }
 
-void handleRoot() {
-    String resp("");
-    resp += "<html>" \
-      "<head><title>IR Daikin Server</title></head>" \
-      "<body>" \
-      "<h1>IR Daikin Server</h1>" \
-      "<div><a href=\"update\">Update Firmware</a></div>" \
-      "<div><form method=\"POST\" action=\"cmd\">";
-    resp += "Power: " + getSelection("power", 0, 1, daikinir.getPower(), on_off);
-    resp += "Temperature: <select name=\"temp\">";
-    for (int i = DAIKIN_MIN_TEMP; i <= DAIKIN_MAX_TEMP; i++) {
-        resp += "<option ";
-        if (i == daikinir.getTemp())
-            resp += "selected ";
-        resp += ">" + String(i) + "</option>";
-    }
-    resp += "</select><br\>";
-    resp += "Mode: " + getSelection("mode", 0, 5, daikinir.getMode(), modes);
-    resp += "Fan speed: " + getSelection("fan", 0, 5, daikinir.getFan(), fan_speeds);
-    resp += "Powerful Mode: " + getSelection("powerful", 0, 1, daikinir.getPowerful(), on_off);
-    resp += "Quiet Mode: " + getSelection("quiet", 0, 1, daikinir.getQuiet(), on_off);
-    resp += "Horizontal Swing: " + getSelection("swingh", 0, 1, daikinir.getSwingHorizontal(), on_off);
-    resp += "Vertical Swing: " + getSelection("swingv", 0, 1, daikinir.getSwingVertical(), on_off);
-    resp += "<input type=\"submit\">" \
-      "</form></div>" \
-      "</body>" \
-      "</html>";
-    server.send(200, "text/html", resp);
+uint8_t atou8(const char *s)
+{
+    uint8_t v = 0;
+    while (*s) { v = (v << 1) + (v << 3) + (*(s++) - '0'); }
+    return v;
 }
 
-void sendOK() {
-    String resp("OK");
-    server.send(200, "text/plaintext", resp);
-}
-
-void handleCmd() {
+void handleCmd(AsyncWebServerRequest *request) {
     String argName;
     uint8_t arg;
-    for (uint8_t i = 0; i < server.args(); i++) {
-        argName = server.argName(i);
-        arg = strtoul(server.arg(i).c_str(), NULL, 10);
-        if (argName == "temp") { daikinir.setTemp(arg); }
-        else if (argName == "fan") { daikinir.setFan(arg); }
-        else if (argName == "power") { daikinir.setPower(arg); }
-        else if (argName == "powerful") { daikinir.setPowerful(arg); }
-        else if (argName == "quiet") { daikinir.setQuiet(arg); }
-        else if (argName == "swingh") { daikinir.setSwingHorizontal(arg); }
-        else if (argName == "swingv") { daikinir.setSwingVertical(arg); }
-        else if (argName == "mode") { daikinir.setMode(arg); }
-        DEBUG_PRINT(argName);
-        DEBUG_PRINT(" ");
-        DEBUG_PRINTLN(arg);
+    int params = request->params();
+    for(int i=0;i<params;i++){
+        AsyncWebParameter* p = request->getParam(i);
+
+        arg = atou8(p->value().c_str());
+        if (p->name().c_str() == "temp") { daikinir.setTemp(arg); }
+        else if (p->name().c_str() == "fan") { daikinir.setFan(arg); }
+        else if (p->name().c_str() == "power") { daikinir.setPower(arg); }
+        else if (p->name().c_str() == "powerful") { daikinir.setPowerful(arg); }
+        else if (p->name().c_str() == "quiet") { daikinir.setQuiet(arg); }
+        else if (p->name().c_str() == "swingh") { daikinir.setSwingHorizontal(arg); }
+        else if (p->name().c_str() == "swingv") { daikinir.setSwingVertical(arg); }
+        else if (p->name().c_str() == "mode") { daikinir.setMode(arg); }
+        Serial.print(argName);
+        Serial.print(" ");
+        Serial.println(arg);
     }
     saveStatus();
     daikinir.send();
     //handleRoot();
-    sendOK();
+    request->send(200, "text/plaintext", "OK");
 }
 
-void handleNotFound() {
-    server.send(404, "text/plain", "404 File Not Found");
-}
-
-void handleRoomConditions() {
-    temperature::Conditions condition = roomConditions.getConditions();
+String handleRoomConditions() {
+    Conditions condition = roomConditions.getConditions();
 
     char buff[500];
     snprintf(buff, sizeof(buff), "{\"tempC\": %f, \"tempF\": %f, \"humidity\": %f}", condition.temperatureC, condition.temperatureF, condition.humidity);
     String resp(buff);
-    server.send(200, "text/plaintext", resp);
+    return resp;
+}
+
+
+void connectWifi(AsyncWebServerRequest *request) {
+    String postBody = request->getParam("plain")->value().c_str();
+    DynamicJsonDocument doc(512);
+    DeserializationError error = deserializeJson(doc, postBody);
+    if (error) {
+        // if the file didn't open, print an error:
+        Serial.print(F("Error parsing JSON "));
+        Serial.println(error.c_str());
+
+        String msg = error.c_str();
+
+        request->send(400, F("text/html"),
+                    "Error in parsin json body! <br>" + msg);
+
+    } else {
+        JsonObject postObj = doc.as<JsonObject>();
+        wifiConnectionManager.connect(postObj["ssid"], postObj["password"]);
+        // server.stop();
+    }
+}
+
+void setupHandlers() {
+    server.on("/setup/scan", HTTP_GET, [](AsyncWebServerRequest *request){
+        String accessPointsJson = wifiConnectionManager.scan();
+        request->send(200, "text/json", accessPointsJson);
+    });
+
+    server.on("/setup/connect", HTTP_POST, [](AsyncWebServerRequest *request){
+        connectWifi(request);
+    });
+
 }
 
 void setup(void) {
-    EEPROM.begin(EEPROM_SIZE);
-    DEBUG_BEGIN(115200);
+
+    if(!LittleFS.begin()){
+        Serial.println("An Error has occurred while mounting LittleFS");
+        return;
+    }
+
+    Serial.begin(115200);
+    delay(3000);
+    Serial.println();
+    //Serial.println("Disconnecting previously connected WiFi");
+    eepromManager.setup(1024);
+//    EEPROMData data;
+//    data.wifiCreds.ssid = "";
+//    data.wifiCreds.password = "";
+//    eepromManager.saveData(data);
+
     roomConditions.setup();
 
 
@@ -181,38 +209,46 @@ void setup(void) {
     daikinir.begin();
     restoreStatus();
 
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-    DEBUG_PRINTLN("");
+    wifiConnectionManager.setup();
+//    WiFi.mode(WIFI_STA);
+//    WiFi.begin(ssid, password);
+//    DEBUG_PRINTLN("");
+//
+//    while (WiFi.status() != WL_CONNECTED) {
+//        delay(500);
+//        DEBUG_PRINT(".");
+//    }
+//    DEBUG_PRINTLN("");
+//    DEBUG_PRINT("Connected to ");
+//    DEBUG_PRINTLN(ssid);
+//    DEBUG_PRINT("IP address: ");
+//    DEBUG_PRINTLN(WiFi.localIP());
 
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        DEBUG_PRINT(".");
-    }
-    DEBUG_PRINTLN("");
-    DEBUG_PRINT("Connected to ");
-    DEBUG_PRINTLN(ssid);
-    DEBUG_PRINT("IP address: ");
-    DEBUG_PRINTLN(WiFi.localIP());
+    server.on("/cmd", HTTP_GET,  handleCmd);
+    server.on("/roomconditions", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send(200, "text/plain", handleRoomConditions());
+    });
+//    server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
+//        request->send(LittleFS, "/style.css", "text/css");
+//    });
+//    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+//        request->send(LittleFS, "/index.html", String(), false, processor);
+//    });
+    server.serveStatic("/", LittleFS, "/");
+    setupHandlers();
 
-    server.on("/", handleRoot);
-    server.on("/cmd", handleCmd);
-    server.on("/roomconditions", handleRoomConditions);
-
-    server.onNotFound(handleNotFound);
-
-    httpUpdater.setup(&server);
     server.begin();
-    DEBUG_PRINTLN("HTTP server started");
+    Serial.println("HTTP server started");
 
-    if (MDNS.begin("daikin", WiFi.localIP())) {
-        DEBUG_PRINTLN("MDNS responder started");
+    if (MDNS.begin("ac", WiFi.localIP())) {
+        Serial.println("MDNS responder started");
     }
 }
 
 void loop(void) {
-    // need to wait until I cant get consistent 5v
     roomConditions.setConditions();
-    server.handleClient();
+    EEPROMData data = eepromManager.getData();
+
+    // wifiConnectionManager.scan();
     delay(300);
 }

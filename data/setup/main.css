@@ -1,0 +1,31 @@
+#accessPoints ul {
+    border: 1px solid #ccc;
+    list-style: none;
+    padding: 0;
+}
+#accessPoints ul li {
+    padding: 4px 8px;
+    border-top: 1px solid #ccc;
+}
+#accessPoints ul li:first-child {
+    margin-top: -1px;
+}
+#accessPoints ul li:hover {
+    background: #ccc;
+    cursor: pointer;
+}
+#accessPoints ul li:active {
+    background: #888;
+}
+#accessPoints ul li > * {
+    display: inline-block;
+}
+#accessPoints ul li .name {
+    width: 200px;
+}
+#accessPoints ul li .mac {
+    width: 150px;
+}
+#accessPoints ul li .security {
+    width: 50px;
+}

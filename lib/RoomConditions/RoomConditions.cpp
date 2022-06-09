@@ -3,7 +3,3 @@
 //
 
 #include "RoomConditions.h"
-
-namespace temperature {
-
-} // temperature

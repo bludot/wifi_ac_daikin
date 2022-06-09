@@ -38,20 +38,16 @@ String convertToString(char* a, int size) {
 void WifiConnectionManager::setup() {
     Serial.println("setting up wifi");
 
-    EEPROMData data = this->eepromManager.getData();
+    StaticJsonDocument<5120> data = this->eepromManager.getData("/config.json");
 
-    int ssid_size = sizeof(data.wifiCreds.ssid) / sizeof(char);
-    String ssidString = convertToString(data.wifiCreds.ssid, ssid_size);
+    String ssid = data["wificreds"]["ssid"].as<String>();
+    String password = data["wificreds"]["password"].as<String>();
 
-    int password_size = sizeof(data.wifiCreds.password) / sizeof(char);
-    String passowrdString = convertToString(data.wifiCreds.password, password_size);
+    Serial.println(ssid);
+    Serial.println(password);
 
-    Serial.println(ssid_size);
-    Serial.println(password_size);
-    Serial.println(ssidString);
-    Serial.println(passowrdString);
 
-    if (ssidString == "" && passowrdString == "") {
+    if (ssid == "" && password == "") {
         // this->server.on("/setup");
         WiFi.softAP(defaultSsid, defaultPassword);
         Serial.println("Initializing_Wifi_accesspoint");
@@ -60,7 +56,7 @@ void WifiConnectionManager::setup() {
         Serial.print("SoftAP IP: ");
         Serial.println(WiFi.softAPIP());
     } else {
-        this->connect(data.wifiCreds.ssid, data.wifiCreds.password);
+        this->connect(ssid, password);
         if (testWifi()) {
             WiFi.softAP(defaultSsid, defaultPassword);
             Serial.println("Initializing_Wifi_accesspoint");
@@ -89,7 +85,7 @@ WifiCredentials WifiConnectionManager::getCredentials() {
     return creds;
 }
 
-WifiConnectionManager::WifiConnectionManager(EEPROMManager<EEPROMData> manager) {
+WifiConnectionManager::WifiConnectionManager(EEPROMManager manager) {
     this->eepromManager = manager;
 }
 
@@ -144,46 +140,17 @@ void WifiConnectionManager::connect(String ssid, String password) {
     WiFi.begin(ssid, password);
     if (testWifi()) {
         Serial.println("preparing to write data");
-        EEPROMData data = this->eepromManager.getData();
-        int ssidN = ssid.length();
+        StaticJsonDocument<5120> data = this->eepromManager.getData("/config.json");
 
-        // declaring character array
-        char ssid_array[ssidN + 1];
+        data["wificreds"]["ssid"] = ssid;
+        data["wificreds"]["password"] = password;
 
-        // copying the contents of the
-        // string to char array
-        strcpy(ssid_array, ssid.c_str());
+        Serial.println(ssid);
+        Serial.println(password);
 
-        for (int i = 0; i < ssidN; i++) {
-            data.wifiCreds.ssid[i] = ssid_array[i];
-        }
-
-        int passwordN = password.length();
-
-        // declaring character array
-        char password_array[passwordN + 1];
-
-        // copying the contents of the
-        // string to char array
-        strcpy(password_array, password.c_str());
-
-        for (int i = 0; i < passwordN; i++) {
-            data.wifiCreds.password[i] = password_array[i];
-        }
-
-        data.acData.temp = 0;
-        data.acData.fan = 0;
-        data.acData.power = 0;
-        data.acData.powerful = 0;
-        data.acData.quiet = 0;
-        data.acData.swingh = 0;
-        data.acData.swingv = 0;
-        data.acData.mode = 0;
-
-        Serial.println(password_array);
-        Serial.println(ssid_array);
-
-        this->eepromManager.saveData(data);
+        String output;
+        serializeJsonPretty(data, output);
+        this->eepromManager.saveData("/config.json", output);
         Serial.println("Wrote data");
     }
 }

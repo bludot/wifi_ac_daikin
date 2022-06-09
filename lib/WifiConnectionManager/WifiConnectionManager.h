@@ -13,9 +13,9 @@ private:
 
     char ssid[20];
     char password[64];
-    EEPROMManager<EEPROMData> eepromManager;
+    EEPROMManager eepromManager;
 public:
-    WifiConnectionManager(EEPROMManager<EEPROMData> manager);
+    WifiConnectionManager(EEPROMManager manager);
     void setup();
     String scan();
     void connect(String ssid, String password);

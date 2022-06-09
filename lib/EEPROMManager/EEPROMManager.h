@@ -19,13 +19,28 @@ public:
         file.close();
 
     };
-    template <typename T>
-    JsonObject getData() {
-        StaticJsonDocument<1024> doc;
-        DeserializationError error = deserializeJson(doc, json);
+    StaticJsonDocument<5120> getData(String fileName) {
+        File file = LittleFS.open(fileName, "r");
+        std::vector<String> v;
+        while (file.available()) {
+            v.push_back(file.readStringUntil('\n'));
+        }
+        file.close();
+
+        String result;
+        for (auto const& s : v) { result += s; }
+
+        StaticJsonDocument<5120> doc;
+        DeserializationError error = deserializeJson(doc, result);
+        if (error) {
+            Serial.print(F("deserializeJson() failed: "));
+            Serial.println(error.f_str());
+
+        }
+        return doc;
     };
 private:
-    String defaultFile = "config.json"
+    String defaultFile = "config.json";
 };
 
 

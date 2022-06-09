@@ -25,7 +25,7 @@
 
 
 RoomConditions roomConditions;
-EEPROMManager<EEPROMData> eepromManager;
+EEPROMManager eepromManager;
 IRDaikinESP daikinir(D1);  // An IR LED is controlled by GPIO pin 4 (D2)
 
 AsyncWebServer server(80);
@@ -68,11 +68,11 @@ void saveStatus() {
     data_new.acData.swingv = daikinir.getSwingVertical();
     data_new.acData.mode = daikinir.getMode();
     data_new.wifiCreds = wifiConnectionManager.getCredentials();
-    eepromManager.saveData(data_new);
+    eepromManager.saveData("/ac.json", data_new);
 }
 
 void restoreStatus() {
-    EEPROMData data_stored = eepromManager.getData();
+    EEPROMData data_stored = eepromManager.getData("/ac.json");
     if (data_stored.acData.power != false) {
         daikinir.setTemp(data_stored.acData.temp);
         daikinir.setFan(data_stored.acData.fan);

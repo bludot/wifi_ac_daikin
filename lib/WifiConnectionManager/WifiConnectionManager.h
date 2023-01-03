@@ -19,7 +19,6 @@ public:
     void setup();
     String scan();
     void connect(String ssid, String password);
-    WifiCredentials getCredentials();
     bool testWifi();
 
 };

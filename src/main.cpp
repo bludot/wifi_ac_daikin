@@ -21,7 +21,7 @@
 #include "../lib/WifiConnectionManager/WifiConnectionManager.h"
 #include <ArduinoJson.h>
 #include "LittleFS.h"
-
+#include "AsyncJson.h"
 
 
 RoomConditions roomConditions;
@@ -30,25 +30,54 @@ IRDaikinESP daikinir(D1);  // An IR LED is controlled by GPIO pin 4 (D2)
 
 AsyncWebServer server(80);
 
-
+struct daikinStruct {
+    uint8_t temp;
+    uint8_t fan;
+    uint8_t power;
+    uint8_t powerful;
+    uint8_t quiet;
+    uint8_t swingh;
+    uint8_t swingv;
+    uint8_t mode;
+};
 
 WifiConnectionManager wifiConnectionManager(eepromManager);
 
-setting_t fan_speeds[6] = { { "Auto", DAIKIN_FAN_AUTO },{ "Slowest", 1 },{ "Slow", 2 },{ "Medium", 3 },{ "Fast", 4 },{ "Fastest", 5 } };
-setting_t modes[5] = { { "Cool", DAIKIN_COOL }, { "Heat", DAIKIN_HEAT }, { "Fan", DAIKIN_FAN }, { "Auto", DAIKIN_AUTO }, { "Dry", DAIKIN_DRY } };
-setting_t on_off[2] = { { "On", 1 }, { "Off", 0 } };
+setting_t fan_speeds[6] = {{"Auto", DAIKIN_FAN_AUTO},
+                           {"Slowest", 1},
+                           {"Slow",    2},
+                           {"Medium",  3},
+                           {"Fast",    4},
+                           {"Fastest", 5}};
+setting_t modes[5] = {{"Cool", DAIKIN_COOL},
+                      {"Heat", DAIKIN_HEAT},
+                      {"Fan",  DAIKIN_FAN},
+                      {"Auto", DAIKIN_AUTO},
+                      {"Dry",  DAIKIN_DRY}};
+setting_t on_off[2] = {{"On",  1},
+                       {"Off", 0}};
+
+EEPROM_data acData = {
+        temp: 0,
+        fan: 0,
+        power: 0,
+        powerful: 0,
+        quiet: 0,
+        swingh: 0,
+        swingv: 0,
+        mode: 0,
+};
 
 const int ledPin = 2;
 String ledState;
 
 // Replaces placeholder with LED state value
-String processor(const String& var){
+String processor(const String &var) {
     Serial.println(var);
-    if(var == "GPIO_STATE"){
-        if(digitalRead(ledPin)){
+    if (var == "GPIO_STATE") {
+        if (digitalRead(ledPin)) {
             ledState = "OFF";
-        }
-        else{
+        } else {
             ledState = "ON";
         }
         Serial.print(ledState);
@@ -58,30 +87,28 @@ String processor(const String& var){
 }
 
 void saveStatus() {
-    EEPROMData data_new;
-    data_new.acData.temp = daikinir.getTemp();
-    data_new.acData.fan = daikinir.getFan();
-    data_new.acData.power = daikinir.getPower();
-    data_new.acData.powerful = daikinir.getPowerful();
-    data_new.acData.quiet = daikinir.getQuiet();
-    data_new.acData.swingh = daikinir.getSwingHorizontal();
-    data_new.acData.swingv = daikinir.getSwingVertical();
-    data_new.acData.mode = daikinir.getMode();
-    data_new.wifiCreds = wifiConnectionManager.getCredentials();
-    eepromManager.saveData("/ac.json", data_new);
+    acData.temp = daikinir.getTemp();
+    acData.fan = daikinir.getFan();
+    acData.power = daikinir.getPower();
+    acData.powerful = daikinir.getPowerful();
+    acData.quiet = daikinir.getQuiet();
+    acData.swingh = daikinir.getSwingHorizontal();
+    acData.swingv = daikinir.getSwingVertical();
+    acData.mode = daikinir.getMode();
+
 }
 
 void restoreStatus() {
-    EEPROMData data_stored = eepromManager.getData("/ac.json");
-    if (data_stored.acData.power != false) {
-        daikinir.setTemp(data_stored.acData.temp);
-        daikinir.setFan(data_stored.acData.fan);
-        daikinir.setPower(data_stored.acData.power);
-        daikinir.setPowerful(data_stored.acData.powerful);
-        daikinir.setQuiet(data_stored.acData.quiet);
-        daikinir.setSwingHorizontal(data_stored.acData.swingh);
-        daikinir.setSwingVertical(data_stored.acData.swingv);
-        daikinir.setMode(data_stored.acData.mode);
+
+    if (acData.power != false) {
+        daikinir.setTemp(acData.temp);
+        daikinir.setFan(acData.fan);
+        daikinir.setPower(acData.power);
+        daikinir.setPowerful(acData.powerful);
+        daikinir.setQuiet(acData.quiet);
+        daikinir.setSwingHorizontal(acData.swingh);
+        daikinir.setSwingVertical(acData.swingv);
+        daikinir.setMode(acData.mode);
         daikinir.send();
     } else {
         daikinir.setTemp(25);
@@ -97,8 +124,8 @@ void restoreStatus() {
     }
 }
 
-String getSelection(const String& name, int min, int max, int selected, setting_t* list) {
-    String ret = "<select name=\""+name+"\">";
+String getSelection(const String &name, int min, int max, int selected, setting_t *list) {
+    String ret = "<select name=\"" + name + "\">";
     for (int i = min; i <= max; i++) {
         ret += "<option ";
         if (list[i].value == selected)
@@ -108,8 +135,7 @@ String getSelection(const String& name, int min, int max, int selected, setting_
     return ret += "</select><br\>";
 }
 
-uint8_t atou8(const char *s)
-{
+uint8_t atou8(const char *s) {
     uint8_t v = 0;
     while (*s) { v = (v << 1) + (v << 3) + (*(s++) - '0'); }
     return v;
@@ -119,8 +145,8 @@ void handleCmd(AsyncWebServerRequest *request) {
     String argName;
     uint8_t arg;
     int params = request->params();
-    for(int i=0;i<params;i++){
-        AsyncWebParameter* p = request->getParam(i);
+    for (int i = 0; i < params; i++) {
+        AsyncWebParameter *p = request->getParam(i);
 
         arg = atou8(p->value().c_str());
         if (p->name().c_str() == "temp") { daikinir.setTemp(arg); }
@@ -145,48 +171,82 @@ String handleRoomConditions() {
     Conditions condition = roomConditions.getConditions();
 
     char buff[500];
-    snprintf(buff, sizeof(buff), "{\"tempC\": %f, \"tempF\": %f, \"humidity\": %f}", condition.temperatureC, condition.temperatureF, condition.humidity);
+    snprintf(buff, sizeof(buff), "{\"tempC\": %f, \"tempF\": %f, \"humidity\": %f}", condition.temperatureC,
+             condition.temperatureF, condition.humidity);
     String resp(buff);
     return resp;
 }
 
 
-void connectWifi(AsyncWebServerRequest *request) {
-    String postBody = request->getParam("plain")->value().c_str();
-    DynamicJsonDocument doc(512);
-    DeserializationError error = deserializeJson(doc, postBody);
-    if (error) {
-        // if the file didn't open, print an error:
-        Serial.print(F("Error parsing JSON "));
-        Serial.println(error.c_str());
+void connectWifi(StaticJsonDocument<1024> doc) {
 
-        String msg = error.c_str();
 
-        request->send(400, F("text/html"),
-                    "Error in parsin json body! <br>" + msg);
+    wifiConnectionManager.connect(doc["ssid"], doc["password"]);
+    // server.stop();
 
-    } else {
-        JsonObject postObj = doc.as<JsonObject>();
-        wifiConnectionManager.connect(postObj["ssid"], postObj["password"]);
-        // server.stop();
-    }
+
+}
+
+void notFound(AsyncWebServerRequest *request) {
+    request->send(404, "application/json", "{\"message\":\"Not found\"}");
 }
 
 void setupHandlers() {
-    server.on("/setup/scan", HTTP_GET, [](AsyncWebServerRequest *request){
+    server.on("/setup/scan", HTTP_GET, [](AsyncWebServerRequest *request) {
         String accessPointsJson = wifiConnectionManager.scan();
         request->send(200, "text/json", accessPointsJson);
     });
-
-    server.on("/setup/connect", HTTP_POST, [](AsyncWebServerRequest *request){
-        connectWifi(request);
+    server.on("/setup/connect", HTTP_POST, [](AsyncWebServerRequest *request) {
+        int params = request->params();
+        Serial.printf("Save settings, %d params", params);
+        for(int i = 0; i < params; i++) {
+            AsyncWebParameter* p = request->getParam(i);
+            if(p->isFile()){
+                Serial.printf("_FILE[%s]: %s, size: %u", p->name().c_str(), p->value().c_str(), p->size());
+            } else if(p->isPost()){
+                Serial.printf("_POST[%s]: %s", p->name().c_str(), p->value().c_str());
+            } else {
+                Serial.printf("_GET[%s]: %s", p->name().c_str(), p->value().c_str());
+            }
+        }
+        if(request->hasParam("body", true))
+        {
+            AsyncWebParameter* p = request->getParam("body", true);
+            String json = p->value();
+            request->send(200, "text/json", json);
+        }
+        if(request->hasParam("plain", true))
+        {
+            AsyncWebParameter* p = request->getParam("body", true);
+            String json = p->value();
+            request->send(200, "text/json", json);
+        }
+        request->send(200, "text/json", "OK");
     });
+//    AsyncCallbackJsonWebHandler *handler = new AsyncCallbackJsonWebHandler("/setup/connect", [](AsyncWebServerRequest *request, JsonVariant &json) {
+//        StaticJsonDocument<1024> data;
+//        if (json.is<JsonArray>())
+//        {
+//            data = json.as<JsonArray>();
+//        }
+//        else if (json.is<JsonObject>())
+//        {
+//            data = json.as<JsonObject>();
+//        }
+//        String response;
+//        serializeJson(data, response);
+//        request->send(200, "application/json", response);
+//        Serial.println(response);
+//        // connectWifi(data);
+//        // request->send(200, "text/plain", "OK");
+//    });
+//    server.addHandler(handler);
 
 }
 
 void setup(void) {
 
-    if(!LittleFS.begin()){
+    if (!LittleFS.begin()) {
         Serial.println("An Error has occurred while mounting LittleFS");
         return;
     }
@@ -195,7 +255,7 @@ void setup(void) {
     delay(3000);
     Serial.println();
     //Serial.println("Disconnecting previously connected WiFi");
-    eepromManager.setup(1024);
+
 //    EEPROMData data;
 //    data.wifiCreds.ssid = "";
 //    data.wifiCreds.password = "";
@@ -224,8 +284,8 @@ void setup(void) {
 //    DEBUG_PRINT("IP address: ");
 //    DEBUG_PRINTLN(WiFi.localIP());
 
-    server.on("/cmd", HTTP_GET,  handleCmd);
-    server.on("/roomconditions", HTTP_GET, [](AsyncWebServerRequest *request){
+    server.on("/cmd", HTTP_GET, handleCmd);
+    server.on("/roomconditions", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send(200, "text/plain", handleRoomConditions());
     });
 //    server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -234,8 +294,20 @@ void setup(void) {
 //    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
 //        request->send(LittleFS, "/index.html", String(), false, processor);
 //    });
-    server.serveStatic("/", LittleFS, "/");
+
+    server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");;
+    server.onNotFound(notFound);
     setupHandlers();
+    server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+        if (!index) {
+            Serial.printf("BodyStart: %u", total);
+        }
+        Serial.printf("%s", (const char *) data);
+        if (index + len == total) {
+            Serial.printf("BodyEnd: %u", total);
+        }
+    });
+
 
     server.begin();
     Serial.println("HTTP server started");
@@ -247,8 +319,6 @@ void setup(void) {
 
 void loop(void) {
     roomConditions.setConditions();
-    EEPROMData data = eepromManager.getData();
-
     // wifiConnectionManager.scan();
     delay(300);
 }

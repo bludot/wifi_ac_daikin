@@ -70,21 +70,6 @@ void WifiConnectionManager::setup() {
 
 }
 
-WifiCredentials WifiConnectionManager::getCredentials() {
-    WifiCredentials creds{};
-    int ssidSize = sizeof(this->ssid) / sizeof(char);
-    for (int i = 0; i < ssidSize; i++) {
-        creds.ssid[i] = this->ssid[i];
-    }
-
-    int passwordSize = sizeof(this->password) / sizeof(char);
-    for (int i = 0; i < passwordSize; i++) {
-        creds.password[i] = this->password[i];
-    }
-
-    return creds;
-}
-
 WifiConnectionManager::WifiConnectionManager(EEPROMManager manager) {
     this->eepromManager = manager;
 }

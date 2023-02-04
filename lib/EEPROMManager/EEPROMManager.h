@@ -12,32 +12,23 @@
 class EEPROMManager {
 public:
     void saveData(String fileName, String data) {
-        LittleFS.remove(fileName);
+        Serial.println("saving data...");
+        Serial.println(data);
+        // LittleFS.remove(fileName);
         File file = LittleFS.open(fileName, "w");
         file.print(data);
         delay(1);
         file.close();
-
     };
-    StaticJsonDocument<5120> getData(String fileName) {
+    String getData(String fileName) {
+        Serial.println("Getting data");
         File file = LittleFS.open(fileName, "r");
-        std::vector<String> v;
-        while (file.available()) {
-            v.push_back(file.readStringUntil('\n'));
-        }
+        String result = file.readString();
         file.close();
+        Serial.println("Got data");
+        return result;
 
-        String result;
-        for (auto const& s : v) { result += s; }
 
-        StaticJsonDocument<5120> doc;
-        DeserializationError error = deserializeJson(doc, result);
-        if (error) {
-            Serial.print(F("deserializeJson() failed: "));
-            Serial.println(error.f_str());
-
-        }
-        return doc;
     };
 private:
     String defaultFile = "config.json";

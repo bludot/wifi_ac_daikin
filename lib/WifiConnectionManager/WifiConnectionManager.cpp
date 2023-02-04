@@ -26,37 +26,20 @@ String getEncryptionType(uint8_t type) {
     }
 }
 
-String convertToString(char* a, int size) {
-    int i;
-    String s = "";
-    for (i = 0; i < size; i++) {
-        s = s + a[i];
-    }
-    return s;
-}
 
 void WifiConnectionManager::setup() {
     Serial.println("setting up wifi");
-
-    StaticJsonDocument<5120> data = this->eepromManager.getData("/config.json");
-
-    String ssid = data["wificreds"]["ssid"].as<String>();
-    String password = data["wificreds"]["password"].as<String>();
-
-    Serial.println(ssid);
-    Serial.println(password);
+    WifiCreds creds = this->config.getWifiCreds();
 
 
-    if (ssid == "" && password == "") {
-        // this->server.on("/setup");
-        WiFi.softAP(defaultSsid, defaultPassword);
-        Serial.println("Initializing_Wifi_accesspoint");
-        Serial.print("Local IP: ");
-        Serial.println(WiFi.localIP());
-        Serial.print("SoftAP IP: ");
-        Serial.println(WiFi.softAPIP());
+    Serial.println(creds.ssid);
+    Serial.println(creds.password);
+
+
+    if ((creds.ssid == "" || creds.ssid == NULL || creds.ssid == "null") && (creds.password == "" || creds.password == NULL || creds.password == "null")) {
+        this->setupAP();
     } else {
-        this->connect(ssid, password);
+        this->connect(creds.ssid, creds.password);
         if (testWifi()) {
             WiFi.softAP(defaultSsid, defaultPassword);
             Serial.println("Initializing_Wifi_accesspoint");
@@ -64,14 +47,26 @@ void WifiConnectionManager::setup() {
             Serial.println(WiFi.localIP());
             Serial.print("SoftAP IP: ");
             Serial.println(WiFi.softAPIP());
+            this->connected = true;
+            this->onConnectCallback();
         }
     }
 
 
 }
 
-WifiConnectionManager::WifiConnectionManager(EEPROMManager manager) {
+void WifiConnectionManager::setupAP() {
+    WiFi.softAP(defaultSsid, defaultPassword);
+    Serial.println("Initializing_Wifi_accesspoint");
+    Serial.print("Local IP: ");
+    Serial.println(WiFi.localIP());
+    Serial.print("SoftAP IP: ");
+    Serial.println(WiFi.softAPIP());
+}
+
+WifiConnectionManager::WifiConnectionManager(EEPROMManager manager, Config config) {
     this->eepromManager = manager;
+    this->config = config;
 }
 
 String WifiConnectionManager::scan() {
@@ -108,9 +103,9 @@ String WifiConnectionManager::scan() {
             Serial.println("No Networks Found");
         }
         WiFi.scanDelete();
-        /*if(WiFi.scanComplete() == -2){
+        if(WiFi.scanComplete() == -2){
             WiFi.scanNetworks(true);
-        }*/
+        }
     }
     String output;
     serializeJsonPretty(doc, output);
@@ -120,24 +115,29 @@ String WifiConnectionManager::scan() {
 void WifiConnectionManager::connect(String ssid, String password) {
     Serial.println(ssid);
     Serial.println(password);
-    WiFi.disconnect();
-    WiFi.mode(WIFI_STA);
+    Serial.println("preparing to write data");
+    WifiCreds creds = WifiCreds();
+    creds.ssid = ssid;
+    creds.password = password;
+    this->config.setWifiCreds(creds);
+
+
+    Serial.println("Wrote data");
+
+//    WiFi.persistent(false);
+//    if(WiFi.getMode() & WIFI_STA){
+//        WiFi.mode(WIFI_OFF);
+//        int timeout = millis()+1200;
+//        // async loop for mode change
+//        while(WiFi.getMode()!= WIFI_OFF && millis()<timeout){
+//            delay(0);
+//        }
+//    }
+    WiFi.persistent(true);
     WiFi.begin(ssid, password);
-    if (testWifi()) {
-        Serial.println("preparing to write data");
-        StaticJsonDocument<5120> data = this->eepromManager.getData("/config.json");
+//    if (testWifi()) {
 
-        data["wificreds"]["ssid"] = ssid;
-        data["wificreds"]["password"] = password;
-
-        Serial.println(ssid);
-        Serial.println(password);
-
-        String output;
-        serializeJsonPretty(data, output);
-        this->eepromManager.saveData("/config.json", output);
-        Serial.println("Wrote data");
-    }
+//    }
 }
 
 bool WifiConnectionManager::testWifi() {
@@ -154,5 +154,11 @@ bool WifiConnectionManager::testWifi() {
     }
     Serial.println("");
     Serial.println("Connection timed out, opening AP or Hotspot");
+    this->setupAP();
+    Serial.println("opened AP or Hotspot");
     return false;
+}
+
+void WifiConnectionManager::setOnConnectCallback(std::function<void()> callback) {
+    this->onConnectCallback = callback;
 }

@@ -26,7 +26,7 @@
 #include <AsyncMqttClient.h>
 #include <Ticker.h>
 
-#define ALLOW_DELAY_CALLS false
+
 #define MQTT_HOST "hivemq.floretos.com"
 // For a cloud MQTT broker, type the domain name
 //#define MQTT_HOST "example.com"
@@ -112,33 +112,7 @@ void saveStatus() {
 
 }
 
-void restoreStatus() {
 
-    if (acData.power != false) {
-        Serial.println("Restoring status");
-        daikinir.setTemp(acData.temp);
-        daikinir.setFan(acData.fan);
-        daikinir.setPower(acData.power);
-        daikinir.setPowerful(acData.powerful);
-        daikinir.setQuiet(acData.quiet);
-        daikinir.setSwingHorizontal(acData.swingh);
-        daikinir.setSwingVertical(acData.swingv);
-        daikinir.setMode(acData.mode);
-        daikinir.send();
-    } else {
-        Serial.println("Setting default status");
-        daikinir.setTemp(25);
-        daikinir.setFan(2);
-        daikinir.setPower(false);
-        daikinir.setPowerful(false);
-        daikinir.setQuiet(false);
-        daikinir.setSwingHorizontal(false);
-        daikinir.setSwingVertical(false);
-        daikinir.setMode(DAIKIN_COOL);
-        daikinir.send();
-        saveStatus();
-    }
-}
 
 String getSelection(const String &name, int min, int max, int selected, setting_t *list) {
     String ret = "<select name=\"" + name + "\">";
@@ -445,9 +419,8 @@ void setup(void) {
     mqttClient.setServer(MQTT_HOST, MQTT_PORT);
     wifiConnectionManager.setOnConnectCallback(onWifiConnect);
     wifiConnectionManager.setup();
-    restoreStatus();
-
-
+    Serial.println("ALLOW_DELAY_CALLS");
+    Serial.println(ALLOW_DELAY_CALLS);
 }
 
 void loop(void) {

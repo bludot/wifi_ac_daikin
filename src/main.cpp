@@ -25,6 +25,7 @@
 #include "AsyncTimer.h"
 #include <AsyncMqttClient.h>
 #include <Ticker.h>
+#include <TaskScheduler.h>
 
 
 #define MQTT_HOST "hivemq.floretos.com"
@@ -38,10 +39,13 @@ Ticker mqttReconnectTimer;
 RoomConditions roomConditions;
 EEPROMManager eepromManager;
 IRDaikinESP daikinir(D1);  // An IR LED is controlled by GPIO pin 4 (D2)
-AsyncTimer t;
 Config config;
 
 AsyncWebServer server(80);
+
+Scheduler runner;
+
+
 
 struct daikinStruct {
     uint8_t temp;
@@ -84,6 +88,13 @@ daikinStruct acData = {
 
 const int ledPin = 2;
 String ledState;
+unsigned long start_time30 = 0;
+unsigned long start_time60 = 0;
+
+// save heartbeat time to variable
+unsigned long heatbeattimestamp = 0;
+
+
 
 // Replaces placeholder with LED state value
 String processor(const String &var) {
@@ -316,10 +327,8 @@ void onMqttConnect(bool sessionPresent) {
     Serial.print("Session present: ");
     Serial.println(sessionPresent);
     mqttClient.subscribe("ac", 1);
+    mqttClient.subscribe("heartbeat-nodemcu", 1);
 
-    t.setInterval([]() {
-        publishRoomConditions();
-    }, 60000);
 }
 
 void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
@@ -355,7 +364,27 @@ void onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties 
         Serial.println("Setting AC");
         setAC(payloadString);
     }
+
+    // if topic is heartbeat-nodemcu then set heartbeat to true
+    if (str == "heartbeat-nodemcu") {
+        Serial.println("Heartbeat received");
+        heatbeattimestamp = millis();
+    }
 }
+
+void checkHeartbeat() {
+    Serial.println("Checking heartbeat");
+    if (millis() - heatbeattimestamp > 30000) {
+        Serial.println("Heartbeat not received for 30 sec");
+        // reset
+        ESP.restart();
+    }
+}
+
+// one min
+Task t1(60000, TASK_FOREVER, &publishRoomConditions);
+// 30 sec
+Task t2(30000, TASK_FOREVER, &checkHeartbeat);
 
 void setup(void) {
 
@@ -421,10 +450,15 @@ void setup(void) {
     wifiConnectionManager.setup();
     Serial.println("ALLOW_DELAY_CALLS");
     Serial.println(ALLOW_DELAY_CALLS);
+    runner.init();
+    runner.addTask(t1);
+    runner.addTask(t2);
+    t1.enable();
+    t2.enable();
 }
 
 void loop(void) {
-    t.handle();
     roomConditions.setConditions();
+    runner.execute();
     delay(300);
 }
